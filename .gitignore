@@ -1,4 +1,25 @@
+# Идея
+.idea/
+
+# Бинарные файлы
+/bin/
+/out/
+
+# Файлы зависимостей
+/go.sum
+/go.mod~
+
+# Тестовые ковержи
+/coverage.txt
+/profile.out
+
+# Переменные окружения
 .env
 .env.local
 .env.*.local
 *.env
+
+# Прочее
+.DS_Store
+*.swp
+*.swo
