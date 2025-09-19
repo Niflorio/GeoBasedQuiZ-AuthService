@@ -9,7 +9,7 @@ type User struct {
 	ID           uuid.UUID  `json:"id" db:"id"`
 	Username     string     `json:"username" db:"username"`
 	Email        string     `json:"email" db:"email"`
-	AvatarBase64 string     `json:"avatar_base64,omitempty" db:"avatar_base64"`
+	AvatarBase64 *string    `json:"avatar_base64,omitempty" db:"avatar_base64"`
 	Status       string     `json:"status,omitempty" db:"status"`
 	CreatedAt    time.Time  `json:"created_at" db:"created_at"`
 	UpdatedAt    *time.Time `json:"updated_at,omitempty" db:"updated_at"`

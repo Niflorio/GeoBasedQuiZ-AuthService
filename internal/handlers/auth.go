@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -62,6 +64,8 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
+	log.Printf("Login attempt: username=%s", req.Username)
+
 	// Получаем пользователя из базы данных
 	user, authData, err := h.userRepo.GetUserByUsername(req.Username)
 	if err != nil {
@@ -75,9 +79,12 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
+	log.Printf("User found: %s, checking password...", user.Username)
+
 	// Проверяем пароль
 	if !utils.CheckPassword(req.Password, authData.PasswordHash) {
 		// Увеличиваем счетчик неудачных попыток
+		log.Printf("Password mismatch for user: %s", user.Username)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
 		return
 	}
@@ -99,11 +106,13 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	// Генерируем refresh токен
 	refreshToken := utils.GenerateRefreshToken()
 
+	deviceInfo := fmt.Sprintf(`{"user_agent": "%s"}`, c.Request.UserAgent())
+
 	// Создаем сессию
 	session := &models.Session{
 		SessionID:    uuid.New(),
 		UserID:       user.ID,
-		DeviceInfo:   c.Request.UserAgent(),
+		DeviceInfo:   deviceInfo,
 		IPAddress:    c.ClientIP(),
 		IssuedAt:     time.Now(),
 		ExpiresAt:    time.Now().Add(7 * 24 * time.Hour), // 7 дней

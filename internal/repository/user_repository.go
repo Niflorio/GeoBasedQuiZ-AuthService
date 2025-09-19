@@ -30,8 +30,8 @@ func (r *UserRepository) CreateUser(user *models.User, password string) error {
 	user.ID = uuid.New()
 	user.CreatedAt = time.Now()
 
-	query := `INSERT INTO user_profiles (id, username, email, created_at) VALUES ($1, $2, $3, $4)`
-	_, err = tx.Exec(query, user.ID, user.Username, user.Email, user.CreatedAt)
+	query := `INSERT INTO user_profiles (id, username, email, avatar_base64, created_at) VALUES ($1, $2, $3, $4, $5)`
+	_, err = tx.Exec(query, user.ID, user.Username, user.Email, user.AvatarBase64, user.CreatedAt)
 	if err != nil {
 		return err
 	}
@@ -71,12 +71,22 @@ func (r *UserRepository) GetUserByUsername(username string) (*models.User, *mode
 	var user models.User
 	var authData models.AuthData
 
+	// Добавляем временную переменную для сканирования avatar_base64
+	var avatar sql.NullString
+
 	err := r.db.QueryRow(query, username).Scan(
-		&user.ID, &user.Username, &user.Email, &user.AvatarBase64, &user.Status,
+		&user.ID, &user.Username, &user.Email, &avatar, &user.Status, // ← Изменили здесь
 		&user.CreatedAt, &user.UpdatedAt, &user.DeletedAt,
 		&authData.PasswordHash, &authData.OAuthProvider, &authData.OAuthID,
 		&authData.LastLogin, &authData.FailedAttempts, &authData.IsLocked, &authData.CreatedAt,
 	)
+
+	// После сканирования преобразуем sql.NullString в *string
+	if avatar.Valid {
+		user.AvatarBase64 = &avatar.String
+	} else {
+		user.AvatarBase64 = nil
+	}
 
 	if err != nil {
 		if err == sql.ErrNoRows {

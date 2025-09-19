@@ -4,7 +4,7 @@ CREATE TABLE user_profiles (
                                username VARCHAR(50) UNIQUE NOT NULL,
                                email VARCHAR(255) UNIQUE NOT NULL,
                                avatar_base64 TEXT,
-                               status VARCHAR(100),
+                               status VARCHAR(100) NOT NULL DEFAULT '',
                                created_at TIMESTAMPTZ DEFAULT NOW(),
                                updated_at TIMESTAMPTZ,
                                deleted_at TIMESTAMPTZ

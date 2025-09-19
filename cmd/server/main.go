@@ -33,13 +33,17 @@ func main() {
 	// Настраиваем роутер
 	router := gin.Default()
 
+	router.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
 	// Маршруты аутентификации
 	authRoutes := router.Group("/auth")
 	{
 		authRoutes.POST("/register", authHandler.Register)
 		authRoutes.POST("/login", authHandler.Login)
 		authRoutes.POST("/refresh", authHandler.RefreshToken)
-		authRoutes.POST("/logout", handlers.AuthMiddleware(userRepo), authHandler.Logout)
+		authRoutes.POST("/logout", authHandler.Logout)
 	}
 
 	// Защищенные маршруты (пример)
@@ -50,6 +54,12 @@ func main() {
 			userID := c.MustGet("userID").(uuid.UUID)
 			c.JSON(http.StatusOK, gin.H{"user_id": userID})
 		})
+	}
+
+	routes := router.Routes()
+	log.Println("Registered routes:")
+	for _, route := range routes {
+		log.Printf("%s %s", route.Method, route.Path)
 	}
 
 	// Запускаем сервер
