@@ -4,28 +4,7 @@
     <option name="autoReloadType" value="ALL" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="4bfb5c38-2c39-4610-ab07-9fb0a1e2c833" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/.env" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/docker-compose.yml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/dockerfile" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/handlers/auth.go" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/models/auth.go" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/models/user.go" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/repository/postgresql.go" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/repository/user_repository.go" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/utils/jwt.go" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/utils/password.go" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/migrations/001_init.down.sql" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/migrations/001_init.up.sql" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/pkg/database/migrate.go" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/pkg/database/migrate/main.go" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/pkg/database/postgres.go" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/cmd/server/main.go" beforeDir="false" afterPath="$PROJECT_DIR$/cmd/server/main.go" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/go.mod" beforeDir="false" afterPath="$PROJECT_DIR$/go.mod" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/go.sum" beforeDir="false" afterPath="$PROJECT_DIR$/go.sum" afterDir="false" />
-    </list>
+    <list default="true" id="4bfb5c38-2c39-4610-ab07-9fb0a1e2c833" name="Changes" comment="" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
