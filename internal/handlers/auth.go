@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -75,8 +76,22 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 	// Проверяем, заблокирован ли аккаунт
 	if authData.IsLocked {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "account is locked"})
-		return
+		if authData.LockedUntil != nil && authData.LockedUntil.After(time.Now()) {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": fmt.Sprintf("account is locked until %s", authData.LockedUntil.Format(time.RFC3339))})
+			return
+		}
+		// Если блокировка истекла, разблокируем
+		if authData.LockedUntil != nil && authData.LockedUntil.Before(time.Now()) {
+			authData.IsLocked = false
+			authData.FailedAttempts = 0
+			authData.LockedUntil = nil
+			query := `UPDATE auth_data SET is_locked = false, failed_attempts = 0, locked_until = NULL WHERE user_id = $1`
+			if _, err := h.userRepo.Db.Exec(query, user.ID); err != nil {
+				log.Printf("Failed to unlock account: %v", err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+				return
+			}
+		}
 	}
 
 	log.Printf("User found: %s, checking password...", user.Username)
@@ -85,7 +100,19 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	if !utils.CheckPassword(req.Password, authData.PasswordHash) {
 		// Увеличиваем счетчик неудачных попыток
 		log.Printf("Password mismatch for user: %s", user.Username)
+		if err := h.userRepo.IncrementFailedAttempts(user.ID); err != nil {
+			log.Printf("Failed to increment failed attempts: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+			return
+		}
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
+		return
+	}
+
+	query := `UPDATE auth_data SET failed_attempts = 0, is_locked = false, locked_until = NULL WHERE user_id = $1`
+	if _, err := h.userRepo.Db.Exec(query, user.ID); err != nil {
+		log.Printf("Failed to reset failed attempts: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 		return
 	}
 
@@ -106,13 +133,18 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	// Генерируем refresh токен
 	refreshToken := utils.GenerateRefreshToken()
 
-	deviceInfo := fmt.Sprintf(`{"user_agent": "%s"}`, c.Request.UserAgent())
+	deviceInfoBytes, err := json.Marshal(map[string]string{"user_agent": c.Request.UserAgent()})
+	if err != nil {
+		log.Printf("Failed to marshal device info: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+		return
+	}
 
 	// Создаем сессию
 	session := &models.Session{
 		SessionID:    uuid.New(),
 		UserID:       user.ID,
-		DeviceInfo:   deviceInfo,
+		DeviceInfo:   string(deviceInfoBytes),
 		IPAddress:    c.ClientIP(),
 		IssuedAt:     time.Now(),
 		ExpiresAt:    time.Now().Add(7 * 24 * time.Hour), // 7 дней
@@ -138,6 +170,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		RefreshToken: refreshToken,
 		ExpiresAt:    expiresAt,
 		User:         *user,
+		Roles:        roles,
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -148,11 +181,98 @@ func (h *AuthHandler) Login(c *gin.Context) {
 }
 
 func (h *AuthHandler) RefreshToken(c *gin.Context) {
-	// Реализация обновления токена
+	var req models.RefreshRequest
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Валидируем refresh-токен
+	session, err := h.userRepo.GetSessionByRefreshToken(req.RefreshToken)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or revoked refresh token"})
+		return
+	}
+
+	// Проверяем, не истек ли срок действия сессии
+	if session.ExpiresAt.Before(time.Now()) {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "refresh token expired"})
+		return
+	}
+
+	// Получаем информацию о пользователе
+	user, err := h.userRepo.GetUserByID(session.UserID)
+	if err != nil {
+		log.Printf("Failed to get user by ID %s: %v", session.UserID, err)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not found"})
+		return
+	}
+
+	// Генерируем новый access-токен
+	accessToken, expiresAt, err := utils.GenerateJWT(user.ID, user.Username, user.Email)
+	if err != nil {
+		log.Printf("Failed to generate JWT: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate token"})
+		return
+	}
+
+	// Генерируем новый refresh-токен (ротация)
+	newRefreshToken := utils.GenerateRefreshToken()
+
+	// Обновляем сессию
+	session.RefreshToken = newRefreshToken
+	session.IssuedAt = time.Now()
+	session.ExpiresAt = time.Now().Add(7 * 24 * time.Hour) // 7 дней
+	session.IsRevoked = false
+
+	if err := h.userRepo.UpdateSession(session); err != nil {
+		log.Printf("Failed to update session: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update session"})
+		return
+	}
+
+	// Получаем роли пользователя
+	roles, err := h.userRepo.GetUserRoles(user.ID)
+	if err != nil {
+		log.Printf("Failed to get user roles: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get user roles"})
+		return
+	}
+
+	response := models.AuthResponse{
+		AccessToken:  accessToken,
+		RefreshToken: newRefreshToken,
+		ExpiresAt:    expiresAt,
+		User:         *user,
+		Roles:        roles,
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data":   response,
+		"status": "success",
+	})
 }
 
 func (h *AuthHandler) Logout(c *gin.Context) {
-	// Реализация выхода из системы
+	var req models.RefreshRequest
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Отзываем сессию
+	if err := h.userRepo.RevokeSession(req.RefreshToken); err != nil {
+		log.Printf("Failed to revoke session: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to logout"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "successfully logged out",
+		"status":  "success",
+	})
 }
 
 func AuthMiddleware(userRepo *repository.UserRepository) gin.HandlerFunc {

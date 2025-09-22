@@ -13,6 +13,7 @@ type AuthData struct {
 	LastLogin      *time.Time `json:"last_login,omitempty" db:"last_login"`
 	FailedAttempts int        `json:"failed_attempts" db:"failed_attempts"`
 	IsLocked       bool       `json:"is_locked" db:"is_locked"`
+	LockedUntil    *time.Time `json:"locked_until,omitempty" db:"locked_until"`
 	CreatedAt      time.Time  `json:"created_at" db:"created_at"`
 }
 
@@ -38,9 +39,13 @@ type RegisterRequest struct {
 	Password string `json:"password" binding:"required,min=8"`
 }
 
+type RefreshRequest struct {
+	RefreshToken string `json:"refresh_token" binding:"required"`
+}
 type AuthResponse struct {
 	AccessToken  string    `json:"access_token"`
 	RefreshToken string    `json:"refresh_token"`
 	ExpiresAt    time.Time `json:"expires_at"`
 	User         User      `json:"user"`
+	Roles        []string  `json:"roles"`
 }

@@ -19,6 +19,7 @@ CREATE TABLE auth_data (
                            last_login TIMESTAMPTZ,
                            failed_attempts INT DEFAULT 0,
                            is_locked BOOLEAN DEFAULT false,
+                           locked_until TIMESTAMP,
                            created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
