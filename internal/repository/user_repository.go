@@ -30,8 +30,8 @@ func (r *UserRepository) CreateUser(user *models.User, password string) error {
 	user.ID = uuid.New()
 	user.CreatedAt = time.Now()
 
-	query := `INSERT INTO user_profiles (id, username, email, avatar_base64, created_at) VALUES ($1, $2, $3, $4, $5)`
-	_, err = tx.Exec(query, user.ID, user.Username, user.Email, user.AvatarBase64, user.CreatedAt)
+	query := `INSERT INTO user_profiles (id, username, email, avatar_base64, created_at, is_verified) VALUES ($1, $2, $3, $4, $5, $6)`
+	_, err = tx.Exec(query, user.ID, user.Username, user.Email, user.AvatarBase64, user.CreatedAt, user.IsVerified)
 	if err != nil {
 		return err
 	}
@@ -66,6 +66,7 @@ func (r *UserRepository) GetUserByUsername(username string) (*models.User, *mode
                u.email,
                u.avatar_base64,
                u.status,
+               u.is_verified,
                u.created_at,
                u.updated_at,
                u.deleted_at,
@@ -90,7 +91,7 @@ func (r *UserRepository) GetUserByUsername(username string) (*models.User, *mode
 	var avatar sql.NullString
 
 	err := r.Db.QueryRow(query, username).Scan(
-		&user.ID, &user.Username, &user.Email, &avatar, &user.Status,
+		&user.ID, &user.Username, &user.Email, &avatar, &user.Status, &user.IsVerified,
 		&user.CreatedAt, &user.UpdatedAt, &user.DeletedAt,
 		&authData.PasswordHash, &authData.OAuthProvider, &authData.OAuthID,
 		&authData.LastLogin, &authData.FailedAttempts, &authData.IsLocked, &authData.CreatedAt, &lockedUntil,
@@ -266,4 +267,48 @@ func (r *UserRepository) IncrementFailedAttempts(userID uuid.UUID) error {
 
 	_, err := r.Db.Exec(query, maxAttempts, time.Now().Add(lockDuration), userID)
 	return err
+}
+
+func (r *UserRepository) CreateVerificationToken(userID uuid.UUID) (string, error) {
+	token := uuid.New()
+	expiresAt := time.Now().Add(24 * time.Hour)
+	query := `
+        INSERT INTO verification_tokens (token, user_id, expires_at, created_at)
+        VALUES ($1, $2, $3, $4)
+    `
+	_, err := r.Db.Exec(query, token, userID, expiresAt, time.Now())
+	if err != nil {
+		return "", err
+	}
+	return token.String(), nil
+}
+
+func (r *UserRepository) VerifyUserByToken(token string) (*uuid.UUID, error) {
+	var userID uuid.UUID
+	var expiresAt time.Time
+	query := `
+        SELECT user_id, expires_at
+        FROM verification_tokens
+        WHERE token = $1
+    `
+	err := r.Db.QueryRow(query, token).Scan(&userID, &expiresAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, errors.New("invalid or expired token")
+		}
+		return nil, err
+	}
+	if expiresAt.Before(time.Now()) {
+		return nil, errors.New("token expired")
+	}
+	// Активируем пользователя
+	updateQuery := `UPDATE user_profiles SET is_verified = true WHERE id = $1 AND deleted_at IS NULL`
+	_, err = r.Db.Exec(updateQuery, userID)
+	if err != nil {
+		return nil, err
+	}
+	// Удаляем токен
+	deleteQuery := `DELETE FROM verification_tokens WHERE token = $1`
+	_, err = r.Db.Exec(deleteQuery, token)
+	return &userID, err
 }

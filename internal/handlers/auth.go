@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -32,10 +33,24 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
-	// Проверяем, существует ли пользователь
+	// Проверяем уникальность username
 	existingUser, _, err := h.userRepo.GetUserByUsername(req.Username)
 	if err == nil && existingUser != nil {
 		c.JSON(http.StatusConflict, gin.H{"error": "username already exists"})
+		return
+	}
+
+	// Проверяем уникальность email
+	query := `SELECT id FROM user_profiles WHERE email = $1 AND deleted_at IS NULL`
+	var userID uuid.UUID
+	err = h.userRepo.Db.QueryRow(query, req.Email).Scan(&userID)
+	if err == nil {
+		c.JSON(http.StatusConflict, gin.H{"error": "email already exists"})
+		return
+	}
+	if err != sql.ErrNoRows {
+		log.Printf("Failed to check email existence: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 		return
 	}
 
@@ -51,9 +66,43 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
+	token, err := h.userRepo.CreateVerificationToken(user.ID)
+	if err != nil {
+		log.Printf("Failed to create verification token: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create verification token"})
+		return
+	}
+
+	// Отправляем письмо асинхронно
+	go func() {
+		if err := utils.SendVerificationEmail(user.Email, user.Username, token); err != nil {
+			log.Printf("Failed to send verification email: %v", err)
+		}
+	}()
+
 	c.JSON(http.StatusCreated, gin.H{
 		"message": "user created successfully",
 		"user_id": user.ID,
+	})
+
+}
+
+func (h *AuthHandler) VerifyEmail(c *gin.Context) {
+	token := c.Query("token")
+	if token == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "token is required"})
+		return
+	}
+
+	userID, err := h.userRepo.VerifyUserByToken(token)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "email verified successfully",
+		"user_id": userID,
 	})
 }
 
@@ -74,6 +123,10 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
+	if !user.IsVerified {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "email not verified"})
+		return
+	}
 	// Проверяем, заблокирован ли аккаунт
 	if authData.IsLocked {
 		if authData.LockedUntil != nil && authData.LockedUntil.After(time.Now()) {
@@ -85,7 +138,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 			authData.IsLocked = false
 			authData.FailedAttempts = 0
 			authData.LockedUntil = nil
-			query := `UPDATE auth_data SET is_locked = false, failed_attempts = 0, locked_until = NULL WHERE user_id = $1`
+			query := `UPDATE  	auth_data SET is_locked = false, failed_attempts = 0, locked_until = NULL WHERE user_id = $1`
 			if _, err := h.userRepo.Db.Exec(query, user.ID); err != nil {
 				log.Printf("Failed to unlock account: %v", err)
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
@@ -158,6 +211,13 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
+	go func() {
+		device := c.Request.UserAgent()
+		if err := utils.SendLoginNotification(user.Email, user.Username, c.ClientIP(), device); err != nil {
+			log.Printf("Failed to send login notification to %s: %v", user.Email, err)
+		}
+	}()
+
 	// Получаем роли пользователя
 	roles, err := h.userRepo.GetUserRoles(user.ID)
 	if err != nil {
@@ -175,7 +235,6 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"data":   response,
-		"roles":  roles,
 		"status": "success",
 	})
 }

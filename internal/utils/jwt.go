@@ -1,6 +1,8 @@
 package utils
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"os"
@@ -58,5 +60,9 @@ func ValidateJWT(tokenString string) (*Claims, error) {
 }
 
 func GenerateRefreshToken() string {
-	return uuid.New().String()
+	bytes := make([]byte, 32)
+	if _, err := rand.Read(bytes); err != nil {
+		return uuid.New().String() // Fallback
+	}
+	return base64.URLEncoding.EncodeToString(bytes)
 }

@@ -1,16 +1,21 @@
 package main
 
 import (
+	"github.com/didip/tollbooth"
+	"github.com/didip/tollbooth/limiter"
 	"github.com/google/uuid"
 	"log"
 	"net/http"
 	"os"
+	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 
 	"AuthService/internal/handlers"
 	"AuthService/internal/repository"
+	_ "AuthService/internal/utils"
 )
 
 func main() {
@@ -29,6 +34,7 @@ func main() {
 	// Инициализируем репозиторий и обработчики
 	userRepo := repository.NewUserRepository(db)
 	authHandler := handlers.NewAuthHandler(userRepo)
+	userHandler := handlers.NewUserHandler(userRepo)
 
 	// Настраиваем роутер
 	router := gin.Default()
@@ -37,13 +43,41 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
+	loginLimit, _ := strconv.ParseFloat(os.Getenv("RATE_LIMIT_LOGIN"), 64)
+	if loginLimit == 0 {
+		loginLimit = 5 // 5 запросов в минуту
+	}
+	registerLimit, _ := strconv.ParseFloat(os.Getenv("RATE_LIMIT_REGISTER"), 64)
+	if registerLimit == 0 {
+		registerLimit = 3 // 3 запроса в 5 минут
+	}
+	refreshLimit, _ := strconv.ParseFloat(os.Getenv("RATE_LIMIT_REFRESH"), 64)
+	if refreshLimit == 0 {
+		refreshLimit = 10 // 10 запросов в минуту
+	}
+	verifyLimit, _ := strconv.ParseFloat(os.Getenv("RATE_LIMIT_VERIFY"), 64)
+	if verifyLimit == 0 {
+		verifyLimit = 5 // 5 запросов в час
+	}
+
 	// Маршруты аутентификации
 	authRoutes := router.Group("/auth")
 	{
-		authRoutes.POST("/register", authHandler.Register)
-		authRoutes.POST("/login", authHandler.Login)
-		authRoutes.POST("/refresh", authHandler.RefreshToken)
-		authRoutes.POST("/logout", authHandler.Logout)
+		authRoutes.POST("/register", RateLimitMiddleware(registerLimit, 5*time.Minute), authHandler.Register)
+		authRoutes.POST("/login", RateLimitMiddleware(loginLimit, time.Minute), authHandler.Login)
+		authRoutes.POST("/refresh", RateLimitMiddleware(refreshLimit, time.Minute), authHandler.RefreshToken)
+		authRoutes.POST("/logout", RateLimitMiddleware(refreshLimit, time.Minute), authHandler.Logout)
+		authRoutes.GET("/verify", RateLimitMiddleware(verifyLimit, time.Hour), authHandler.VerifyEmail)
+	}
+
+	adminGroup := router.Group("/admin", handlers.AuthMiddleware(userRepo), userHandler.AdminOnly())
+	{
+		adminGroup.GET("/users", userHandler.GetUsers)
+		adminGroup.GET("/users/:id", userHandler.GetUser)
+		adminGroup.PUT("/users/:id", userHandler.UpdateUser)
+		adminGroup.DELETE("/users/:id", userHandler.DeleteUser)
+		adminGroup.POST("/users/:id/roles", userHandler.AddUserRole)
+		adminGroup.DELETE("/users/:id/roles/:role", userHandler.RemoveUserRole)
 	}
 
 	// Защищенные маршруты (пример)
@@ -71,5 +105,24 @@ func main() {
 	log.Printf("Server starting on port %s", port)
 	if err := router.Run(":" + port); err != nil {
 		log.Fatal("Failed to start server:", err)
+	}
+}
+
+// Функция для создания rate limiter middleware
+func RateLimitMiddleware(maxRequests float64, ttl time.Duration) gin.HandlerFunc {
+	lmt := tollbooth.NewLimiter(maxRequests, &limiter.ExpirableOptions{DefaultExpirationTTL: ttl})
+	lmt.SetIPLookups([]string{"RemoteAddr", "X-Forwarded-For", "X-Real-IP"}) // Для прокси
+	lmt.SetMessage("You have reached the maximum number of requests. Please try again later.")
+	lmt.SetMessageContentType("application/json")
+	lmt.SetStatusCode(http.StatusTooManyRequests)
+
+	return func(c *gin.Context) {
+		httpError := tollbooth.LimitByRequest(lmt, c.Writer, c.Request)
+		if httpError != nil {
+			c.JSON(httpError.StatusCode, gin.H{"error": httpError.Message})
+			c.Abort()
+			return
+		}
+		c.Next()
 	}
 }
