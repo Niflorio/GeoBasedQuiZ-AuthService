@@ -134,12 +134,10 @@ func createAdmin(db *sql.DB) error {
 
 	// Вставка в user_profiles
 	_, err = tx.Exec(`
-		INSERT INTO user_profiles (id, username, email, avatar_base64, created_at)
-		VALUES ($1, $2, $3, $4, $5)
-		ON CONFLICT (email) DO NOTHING`,
-		userID, username, email, nil, time.Now())
+        INSERT INTO user_profiles (id, username, email, avatar_base64, status, is_verified, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		userID, username, email, nil, "active", true, time.Now())
 	if err != nil {
-		tx.Rollback()
 		return fmt.Errorf("failed to insert user profile: %w", err)
 	}
 
