@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"log"
 	"net/http"
 	"time"
 )
@@ -19,14 +20,22 @@ func NewUserHandler(userRepo *repository.UserRepository) *UserHandler {
 
 func (h *UserHandler) AdminOnly() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		userID := c.GetString("userID") // Из JWT (добавлено ранее)
-		if userID == "" {
+		userID, exists := c.Get("userID")
+		if !exists {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 			c.Abort()
 			return
 		}
 
-		roles, err := h.userRepo.GetUserRoles(uuid.MustParse(userID))
+		// Преобразуем в uuid.UUID
+		uid, ok := userID.(uuid.UUID)
+		if !ok {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user ID"})
+			c.Abort()
+			return
+		}
+
+		roles, err := h.userRepo.GetUserRoles(uid)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch roles"})
 			c.Abort()
@@ -145,11 +154,18 @@ func (h *UserHandler) UpdateUser(c *gin.Context) {
 	}
 
 	query := `UPDATE user_profiles SET avatar_base64 = COALESCE($1, avatar_base64), status = COALESCE($2, status), updated_at = NOW() WHERE id = $3 AND deleted_at IS NULL`
-	_, err := h.userRepo.Db.Exec(query, req.AvatarBase64, req.Status, userID)
+	result, err := h.userRepo.Db.Exec(query, req.AvatarBase64, req.Status, userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update user"})
 		return
 	}
+
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{"message": "user updated"})
 }
 
@@ -161,15 +177,26 @@ func (h *UserHandler) DeleteUser(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete user"})
 		return
 	}
-	if rows, _ := result.RowsAffected(); rows == 0 {
+
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
 		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
 		return
 	}
+
 	c.JSON(http.StatusOK, gin.H{"message": "user deleted"})
 }
 
 func (h *UserHandler) AddUserRole(c *gin.Context) {
-	userID := c.Param("id")
+	userIDParam := c.Param("id")
+
+	// Преобразуем строковый ID в uuid.UUID
+	userID, err := uuid.Parse(userIDParam)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user ID format"})
+		return
+	}
+
 	var req struct {
 		Role string `json:"role" binding:"required,oneof=user content-moderator admin"`
 	}
@@ -178,27 +205,66 @@ func (h *UserHandler) AddUserRole(c *gin.Context) {
 		return
 	}
 
-	query := `INSERT INTO user_roles (user_id, role, granted_at, granted_by) VALUES ($1, $2, NOW(), $3) ON CONFLICT (user_id, role) DO NOTHING`
-	_, err := h.userRepo.Db.Exec(query, userID, req.Role, c.GetString("userID"))
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to add role"})
+	currentUserID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
+
+	// Преобразуем currentUserID в uuid.UUID
+	grantedBy, ok := currentUserID.(uuid.UUID)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid user ID type"})
+		return
+	}
+
+	// Проверяем, существует ли пользователь
+	_, err = h.userRepo.GetUserByID(userID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+
+	query := `INSERT INTO user_roles (user_id, role, granted_at, granted_by) VALUES ($1, $2, NOW(), $3) ON CONFLICT (user_id, role) DO NOTHING`
+	result, err := h.userRepo.Db.Exec(query, userID, req.Role, grantedBy)
+	if err != nil {
+		log.Printf("Failed to add role: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to add role", "details": err.Error()}) // Добавим детали ошибки для отладки
+		return
+	}
+
+	// Проверяем, была ли добавлена роль
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		c.JSON(http.StatusConflict, gin.H{"error": "role already exists"})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{"message": "role added"})
 }
 
 func (h *UserHandler) RemoveUserRole(c *gin.Context) {
-	userID := c.Param("id")
+	userIDParam := c.Param("id")
+
+	// Преобразуем строковый ID в uuid.UUID
+	userID, err := uuid.Parse(userIDParam)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user ID format"})
+		return
+	}
+
 	role := c.Param("role")
 	query := `DELETE FROM user_roles WHERE user_id = $1 AND role = $2`
 	result, err := h.userRepo.Db.Exec(query, userID, role)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to remove role"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to remove role", "details": err.Error()}) // Добавим детали ошибки
 		return
 	}
-	if rows, _ := result.RowsAffected(); rows == 0 {
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
 		c.JSON(http.StatusNotFound, gin.H{"error": "role not found"})
 		return
 	}
+
 	c.JSON(http.StatusOK, gin.H{"message": "role removed"})
 }

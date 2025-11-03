@@ -85,8 +85,46 @@ func main() {
 	protected.Use(handlers.AuthMiddleware(userRepo))
 	{
 		protected.GET("/profile", func(c *gin.Context) {
-			userID := c.MustGet("userID").(uuid.UUID)
-			c.JSON(http.StatusOK, gin.H{"user_id": userID})
+			userID, exists := c.Get("userID")
+			if !exists {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+				return
+			}
+
+			// Безопасное преобразование типа - используем type assertion
+			uid, ok := userID.(uuid.UUID)
+			if !ok {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid user ID type"})
+				return
+			}
+
+			c.JSON(http.StatusOK, gin.H{"user_id": uid})
+		})
+
+		protected.GET("/my-roles", func(c *gin.Context) {
+			userID, exists := c.Get("userID")
+			if !exists {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+				return
+			}
+
+			uid, ok := userID.(uuid.UUID)
+			if !ok {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid user ID type"})
+				return
+			}
+
+			roles, err := userRepo.GetUserRoles(uid)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch roles"})
+				return
+			}
+
+			c.JSON(http.StatusOK, gin.H{
+				"user_id":  uid,
+				"roles":    roles,
+				"is_admin": isAdmin(roles),
+			})
 		})
 	}
 
@@ -125,4 +163,13 @@ func RateLimitMiddleware(maxRequests float64, ttl time.Duration) gin.HandlerFunc
 		}
 		c.Next()
 	}
+}
+
+func isAdmin(roles []string) bool {
+	for _, role := range roles {
+		if role == "admin" {
+			return true
+		}
+	}
+	return false
 }
