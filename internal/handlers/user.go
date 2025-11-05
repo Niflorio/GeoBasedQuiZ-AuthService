@@ -133,13 +133,44 @@ func (h *UserHandler) GetUsers(c *gin.Context) {
 }
 
 func (h *UserHandler) GetUser(c *gin.Context) {
-	userID := c.Param("id")
-	u, err := h.userRepo.GetUserByID(uuid.MustParse(userID))
+	userIDParam := c.Param("id")
+
+	// Преобразуем строковый ID в uuid.UUID
+	userID, err := uuid.Parse(userIDParam)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user ID format"})
+		return
+	}
+
+	// Получаем базовую информацию о пользователе
+	u, err := h.userRepo.GetUserByID(userID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"user": u})
+
+	// Получаем роли пользователя
+	roles, err := h.userRepo.GetUserRoles(userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get user roles"})
+		return
+	}
+
+	// Создаем полный ответ с ролями
+	userResponse := map[string]interface{}{
+		"id":            u.ID,
+		"username":      u.Username,
+		"email":         u.Email,
+		"avatar_base64": u.AvatarBase64,
+		"status":        u.Status,
+		"is_verified":   u.IsVerified,
+		"created_at":    u.CreatedAt,
+		"updated_at":    u.UpdatedAt,
+		"deleted_at":    u.DeletedAt,
+		"roles":         roles, // Добавляем роли в ответ
+	}
+
+	c.JSON(http.StatusOK, gin.H{"user": userResponse})
 }
 
 func (h *UserHandler) UpdateUser(c *gin.Context) {
