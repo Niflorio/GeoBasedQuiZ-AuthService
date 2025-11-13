@@ -40,7 +40,7 @@ func main() {
 	defer db.Close()
 
 	// Создаем экземпляр драйвера для миграций
-	driver, err := postgres.WithInstance(db, &postgres.Config{})
+	driver, err := postgres.WithInstance(db, &postgres.Config{MigrationsTable: "auth_service_migrations"})
 	if err != nil {
 		log.Fatal("Failed to create migrations driver:", err)
 	}

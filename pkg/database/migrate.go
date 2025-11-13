@@ -11,7 +11,9 @@ import (
 
 // RunMigrations применяет миграции к базе данных
 func RunMigrations(db *sql.DB) error {
-	driver, err := postgres.WithInstance(db, &postgres.Config{})
+
+	driver, err := postgres.WithInstance(db, &postgres.Config{
+		MigrationsTable: "auth_service_migrations"})
 	if err != nil {
 		return err
 	}
