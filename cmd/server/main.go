@@ -59,6 +59,10 @@ func main() {
 	if verifyLimit == 0 {
 		verifyLimit = 5 // 5 запросов в час
 	}
+	validateLimit, _ := strconv.ParseFloat(os.Getenv("RATE_LIMIT_VALIDATE"), 64)
+	if validateLimit == 0 {
+		validateLimit = 100 // 100 запросов в минуту на сервис
+	}
 
 	// Маршруты аутентификации
 	authRoutes := router.Group("/auth")
@@ -68,6 +72,11 @@ func main() {
 		authRoutes.POST("/refresh", RateLimitMiddleware(refreshLimit, time.Minute), authHandler.RefreshToken)
 		authRoutes.POST("/logout", RateLimitMiddleware(refreshLimit, time.Minute), authHandler.Logout)
 		authRoutes.GET("/verify", RateLimitMiddleware(verifyLimit, time.Hour), authHandler.VerifyEmail)
+
+		authRoutes.GET("/validate-token",
+			RateLimitMiddleware(validateLimit, time.Minute),
+			//middleware.InternalOnlyMiddleware(),
+			authHandler.ValidateToken)
 	}
 
 	adminGroup := router.Group("/admin", handlers.AuthMiddleware(userRepo), userHandler.AdminOnly())

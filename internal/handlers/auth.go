@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -334,6 +335,95 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 	})
 }
 
+// ValidateToken - endpoint для проверки токена другими сервисами
+func (h *AuthHandler) ValidateToken(c *gin.Context) {
+	authHeader := c.GetHeader("Authorization")
+	expectedToken := os.Getenv("SERVICE_SECRET_TOKEN")
+	serviceToken := c.GetHeader("X-Service-Token")
+
+	if serviceToken != expectedToken {
+		c.JSON(http.StatusForbidden, gin.H{
+			"valid": false,
+			"error": "invalid service token",
+		})
+		return
+	}
+	if authHeader == "" {
+		c.JSON(http.StatusOK, gin.H{
+			"valid": false,
+			"error": "authorization header is required",
+		})
+		return
+	}
+
+	// Извлекаем токен из заголовка
+	tokenParts := strings.Split(authHeader, " ")
+	if len(tokenParts) != 2 || tokenParts[0] != "Bearer" {
+		c.JSON(http.StatusOK, gin.H{
+			"valid": false,
+			"error": "invalid authorization format",
+		})
+		return
+	}
+
+	tokenString := tokenParts[1]
+
+	// Валидация JWT токена
+	claims, err := utils.ValidateJWT(tokenString)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"valid": false,
+			"error": "invalid token: " + err.Error(),
+		})
+		return
+	}
+
+	// Получаем информацию о пользователе
+	user, err := h.userRepo.GetUserByID(claims.UserID)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"valid": false,
+			"error": "user not found",
+		})
+		return
+	}
+
+	// Проверяем, не удален ли пользователь
+	if user.DeletedAt != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"valid": false,
+			"error": "user account deleted",
+		})
+		return
+	}
+
+	/*
+		if !user.IsVerified {
+			c.JSON(http.StatusOK, gin.H{
+				"valid": false,
+				"error": "email not verified",
+			})
+			return
+		}
+	*/
+
+	// Получаем роли пользователя
+	roles, err := h.userRepo.GetUserRoles(claims.UserID)
+	if err != nil {
+		roles = []string{}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"valid": true,
+		"user": gin.H{
+			"id":         user.ID.String(),
+			"username":   user.Username,
+			"email":      user.Email,
+			"deleted_at": user.DeletedAt,
+			"roles":      roles,
+		},
+	})
+}
 func AuthMiddleware(userRepo *repository.UserRepository) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
