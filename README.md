@@ -96,7 +96,6 @@ go run ./cmd/server
 ## Связанные репозитории
 
 - [GeoBasedQuiZ — обзор проекта](https://github.com/Niflorio/GeoBasedQuiZ)
-- [Auth Service](https://github.com/Niflorio/GeoBasedQuiZ-AuthService)
 - [GeoData Service](https://github.com/Niflorio/GeoBasedQuiZ-GeoDataService)
 - [Achievements Service](https://github.com/Niflorio/GeoBasedQuiZ-AchievementsService)
 - [Feedback Service](https://github.com/Niflorio/GeoBasedQuiZ-FeedbackService)
